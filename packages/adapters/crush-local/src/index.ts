@@ -36,7 +36,7 @@ Operational fields:
 Notes:
 - Prompts are passed to Crush as a positional argument to \`crush run\`; output is plain text.
 - Sessions resume with --session <id> when stored session cwd matches the current cwd.
-- Paperclip injects skills into \`~/.config/crush/skills/\` via symlinks at runtime.
+- Paperclip links selected skills in an agent-specific directory under \`~/.paperclip/crush/\` and passes it through \`CRUSH_SKILLS_DIR\`.
 - Crush runs non-interactively. Configure tool permissions in Crush for unattended work.
 - Token usage and cost are not available from the Crush CLI output.
 `;

@@ -1,6 +1,5 @@
 import path from "node:path";
 import fs from "node:fs/promises";
-import os from "node:os";
 import { fileURLToPath } from "node:url";
 import type {
   AdapterSkillContext,
@@ -13,17 +12,14 @@ import {
   readInstalledSkillTargets,
   resolveLegacyPaperclipDesiredSkillNames,
 } from "@paperclipai/adapter-utils/server-utils";
+import { crushSkillsDir } from "./command.js";
 
 const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
-function resolveCrushSkillsHome(_config: Record<string, unknown>): string {
-  return path.join(os.homedir(), ".config", "crush", "skills");
-}
-
-async function buildCrushSkillSnapshot(config: Record<string, unknown>): Promise<AdapterSkillSnapshot> {
-  const availableEntries = await readPaperclipRuntimeSkillEntries(config, __moduleDir);
-  const desiredSkills = resolveLegacyPaperclipDesiredSkillNames(config, availableEntries);
-  const skillsHome = resolveCrushSkillsHome(config);
+async function buildCrushSkillSnapshot(ctx: AdapterSkillContext): Promise<AdapterSkillSnapshot> {
+  const availableEntries = await readPaperclipRuntimeSkillEntries(ctx.config, __moduleDir);
+  const desiredSkills = resolveLegacyPaperclipDesiredSkillNames(ctx.config, availableEntries);
+  const skillsHome = crushSkillsDir(ctx.companyId, ctx.agentId);
   const installed = await readInstalledSkillTargets(skillsHome);
   return buildPersistentSkillSnapshot({
     adapterType: "crush_local",
@@ -31,7 +27,7 @@ async function buildCrushSkillSnapshot(config: Record<string, unknown>): Promise
     desiredSkills,
     installed,
     skillsHome,
-    locationLabel: "~/.config/crush/skills",
+    locationLabel: "Paperclip agent Crush skills",
     missingDetail: "Configured but not currently linked into the Crush skills home.",
     externalConflictDetail: "Skill name is occupied by an external installation.",
     externalDetail: "Installed outside Paperclip management.",
@@ -39,7 +35,7 @@ async function buildCrushSkillSnapshot(config: Record<string, unknown>): Promise
 }
 
 export async function listCrushSkills(ctx: AdapterSkillContext): Promise<AdapterSkillSnapshot> {
-  return buildCrushSkillSnapshot(ctx.config);
+  return buildCrushSkillSnapshot(ctx);
 }
 
 export async function syncCrushSkills(
@@ -51,7 +47,7 @@ export async function syncCrushSkills(
     ...resolveLegacyPaperclipDesiredSkillNames({}, availableEntries),
     ...desiredSkills,
   ]);
-  const skillsHome = resolveCrushSkillsHome(ctx.config);
+  const skillsHome = crushSkillsDir(ctx.companyId, ctx.agentId);
   await fs.mkdir(skillsHome, { recursive: true });
   const installed = await readInstalledSkillTargets(skillsHome);
   const availableByRuntimeName = new Map(availableEntries.map((entry) => [entry.runtimeName, entry]));
@@ -70,5 +66,5 @@ export async function syncCrushSkills(
     await fs.unlink(path.join(skillsHome, name)).catch(() => {});
   }
 
-  return buildCrushSkillSnapshot(ctx.config);
+  return buildCrushSkillSnapshot(ctx);
 }

@@ -18,6 +18,7 @@ The Paperclip adapter does not configure or validate the provider's API key. Its
 ## Behavior and limits
 
 - The adapter passes the Paperclip task prompt as one argument to `crush run --quiet` and streams Crush's plain-text output to the run log.
+- Paperclip links selected skills in a separate directory for each company and agent. It sets `CRUSH_SKILLS_DIR` for the Crush process.
 - It records the last Crush session ID after a successful run and uses `--session` on the next run in the same directory. If the saved session is missing, it retries once without that ID.
 - Configure unattended tool permissions in Crush before relying on automated runs.
 - Select a local Paperclip environment. This adapter does not run in remote execution targets.

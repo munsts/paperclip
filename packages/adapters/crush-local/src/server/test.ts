@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import type {
   AdapterEnvironmentCheck,
   AdapterEnvironmentTestContext,
@@ -13,6 +14,7 @@ import {
   runChildProcess,
 } from "@paperclipai/adapter-utils/server-utils";
 import { isCrushAgentFailure } from "./execute.js";
+import { crushDataDir, crushExtraArgs, crushRunArgs, crushSkillsDir } from "./command.js";
 
 function summarizeStatus(checks: AdapterEnvironmentCheck[]): AdapterEnvironmentTestResult["status"] {
   if (checks.some((check) => check.level === "error")) return "fail";
@@ -54,10 +56,12 @@ export async function testEnvironment(
   }
 
   const envConfig = parseObject(config.env);
+  const dataDir = crushDataDir(ctx.companyId, "environment-probe");
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(envConfig)) {
     if (typeof value === "string") env[key] = value;
   }
+  env.CRUSH_SKILLS_DIR = crushSkillsDir(ctx.companyId, "environment-probe");
   const runtimeEnv = Object.fromEntries(
     Object.entries(ensurePathInEnv({ ...process.env, ...env })).filter(
       (entry): entry is [string, string] => typeof entry[1] === "string",
@@ -86,11 +90,16 @@ export async function testEnvironment(
   );
 
   if (canRunProbe) {
+    await fs.mkdir(dataDir, { recursive: true });
     const helloProbeTimeoutSec = Math.max(1, asNumber(config.helloProbeTimeoutSec, 30));
-    const probeArgs = ["run", "--quiet", "--cwd", cwd];
     const model = asString(config.model, "").trim();
-    if (model) probeArgs.push("--model", model);
-    probeArgs.push("Respond with only the word: hello");
+    const probeArgs = crushRunArgs({
+      cwd,
+      dataDir,
+      model,
+      extraArgs: crushExtraArgs(config),
+      prompt: "Respond with only the word: hello",
+    });
 
     const probe = await runChildProcess(
       `crush-envtest-${Date.now()}-${Math.random().toString(16).slice(2)}`,

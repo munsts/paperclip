@@ -1,5 +1,4 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AdapterExecutionContext, AdapterExecutionResult } from "@paperclipai/adapter-utils";
@@ -7,7 +6,6 @@ import { readAdapterExecutionTarget } from "@paperclipai/adapter-utils/execution
 import {
   asString,
   asNumber,
-  asStringArray,
   parseObject,
   buildPaperclipEnv,
   buildRuntimeToolsEnv,
@@ -27,12 +25,9 @@ import {
   DEFAULT_PAPERCLIP_AGENT_PROMPT_TEMPLATE,
   runChildProcess,
 } from "@paperclipai/adapter-utils/server-utils";
+import { crushDataDir, crushExtraArgs, crushRunArgs, crushSkillsDir } from "./command.js";
 
 const __moduleDir = path.dirname(fileURLToPath(import.meta.url));
-
-function crushSkillsHome(): string {
-  return path.join(os.homedir(), ".config", "crush", "skills");
-}
 
 export function isCrushAgentFailure(output: string): boolean {
   return output.trimStart().startsWith("Agent processing failed:");
@@ -40,6 +35,7 @@ export function isCrushAgentFailure(output: string): boolean {
 
 async function ensureCrushSkillsInjected(
   onLog: AdapterExecutionContext["onLog"],
+  skillsHome: string,
   skillsEntries: Array<{ key: string; runtimeName: string; source: string }>,
   desiredSkillNames?: string[],
 ): Promise<void> {
@@ -47,7 +43,6 @@ async function ensureCrushSkillsInjected(
   const selectedEntries = skillsEntries.filter((entry) => desiredSet.has(entry.key));
   if (selectedEntries.length === 0) return;
 
-  const skillsHome = crushSkillsHome();
   try {
     await fs.mkdir(skillsHome, { recursive: true });
   } catch (err) {
@@ -152,7 +147,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   // `session last` is otherwise shared by every Crush invocation on the host.
   // Give each Paperclip agent its own data directory so a different agent's
   // run cannot be mistaken for this agent's resumable session.
-  const dataDir = path.join(os.homedir(), ".paperclip", "crush", agent.companyId, agent.id);
+  const dataDir = crushDataDir(agent.companyId, agent.id);
+  const skillsHome = crushSkillsDir(agent.companyId, agent.id);
   await fs.mkdir(dataDir, { recursive: true });
   const workspaceHints = Array.isArray(context.paperclipWorkspaces)
     ? context.paperclipWorkspaces.filter(
@@ -167,7 +163,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
   const crushSkillEntries = await readPaperclipRuntimeSkillEntries(config, __moduleDir);
   const desiredSkillNames = resolveLegacyPaperclipDesiredSkillNames(config, crushSkillEntries);
-  await ensureCrushSkillsInjected(onLog, crushSkillEntries, desiredSkillNames);
+  await ensureCrushSkillsInjected(onLog, skillsHome, crushSkillEntries, desiredSkillNames);
 
   const envConfig = parseObject(config.env);
   const hasExplicitApiKey =
@@ -221,6 +217,9 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   for (const [key, value] of Object.entries(envConfig)) {
     if (typeof value === "string") env[key] = value;
   }
+  // Crush replaces its global skill search paths with this directory. Never
+  // expose another Paperclip agent's company skills through a shared home.
+  env.CRUSH_SKILLS_DIR = skillsHome;
   if (!hasExplicitApiKey && authToken) {
     env.PAPERCLIP_API_KEY = authToken;
   }
@@ -240,11 +239,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
   const timeoutSec = asNumber(config.timeoutSec, 0);
   const graceSec = asNumber(config.graceSec, 15);
-  const extraArgs = (() => {
-    const fromExtraArgs = asStringArray(config.extraArgs);
-    if (fromExtraArgs.length > 0) return fromExtraArgs;
-    return asStringArray(config.args);
-  })();
+  const extraArgs = crushExtraArgs(config);
 
   const runtimeSessionParams = parseObject(runtime.sessionParams);
   const runtimeSessionId = asString(runtimeSessionParams.sessionId, runtime.sessionId ?? "");
@@ -289,37 +284,35 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     run: { id: runId, source: "on_demand" },
     context,
   };
-  const renderedBootstrapPrompt =
-    !sessionId && bootstrapPromptTemplate.trim().length > 0
-      ? renderTemplate(bootstrapPromptTemplate, templateData).trim()
-      : "";
-  const wakePrompt = renderPaperclipWakePrompt(context.paperclipWake, { resumedSession: Boolean(sessionId) });
-  const shouldUseResumeDeltaPrompt = Boolean(sessionId) && wakePrompt.length > 0;
-  const renderedPrompt = shouldUseResumeDeltaPrompt ? "" : renderTemplate(promptTemplate, templateData);
   const sessionHandoffNote = asString(context.paperclipSessionHandoffMarkdown, "").trim();
-  const prompt = joinPromptSections([
-    instructionsPrefix,
-    renderedBootstrapPrompt,
-    wakePrompt,
-    sessionHandoffNote,
-    renderedPrompt,
-  ]);
-  const promptMetrics = {
-    promptChars: prompt.length,
-    instructionsChars: instructionsPrefix.length,
-    bootstrapPromptChars: renderedBootstrapPrompt.length,
-    wakePromptChars: wakePrompt.length,
-    sessionHandoffChars: sessionHandoffNote.length,
-    heartbeatPromptChars: renderedPrompt.length,
-  };
-
-  const buildArgs = (resumeSessionId: string | null, promptText: string): string[] => {
-    const args = ["run", "--quiet", "--cwd", cwd, "--data-dir", dataDir];
-    if (resumeSessionId) args.push("--session", resumeSessionId);
-    if (model) args.push("--model", model);
-    if (extraArgs.length > 0) args.push(...extraArgs);
-    args.push(promptText);
-    return args;
+  const buildPrompt = (resumeSessionId: string | null) => {
+    const renderedBootstrapPrompt =
+      !resumeSessionId && bootstrapPromptTemplate.trim().length > 0
+        ? renderTemplate(bootstrapPromptTemplate, templateData).trim()
+        : "";
+    const wakePrompt = renderPaperclipWakePrompt(context.paperclipWake, {
+      resumedSession: Boolean(resumeSessionId),
+    });
+    const shouldUseResumeDeltaPrompt = Boolean(resumeSessionId) && wakePrompt.length > 0;
+    const renderedPrompt = shouldUseResumeDeltaPrompt ? "" : renderTemplate(promptTemplate, templateData);
+    const prompt = joinPromptSections([
+      instructionsPrefix,
+      renderedBootstrapPrompt,
+      wakePrompt,
+      sessionHandoffNote,
+      renderedPrompt,
+    ]);
+    return {
+      prompt,
+      promptMetrics: {
+        promptChars: prompt.length,
+        instructionsChars: instructionsPrefix.length,
+        bootstrapPromptChars: renderedBootstrapPrompt.length,
+        wakePromptChars: wakePrompt.length,
+        sessionHandoffChars: sessionHandoffNote.length,
+        heartbeatPromptChars: renderedPrompt.length,
+      },
+    };
   };
 
   const commandNotes: string[] = [
@@ -331,7 +324,8 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   }
 
   const runAttempt = async (resumeSessionId: string | null) => {
-    const args = buildArgs(resumeSessionId, prompt);
+    const { prompt, promptMetrics } = buildPrompt(resumeSessionId);
+    const args = crushRunArgs({ cwd, dataDir, model, extraArgs, sessionId: resumeSessionId, prompt });
     if (onMeta) {
       await onMeta({
         adapterType: "crush_local",
@@ -427,7 +421,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         stderr: proc.stderr,
       },
       summary: summary || null,
-      clearSession: clearSessionOnMissingSession || sessionFailed,
+      clearSession: (clearSessionOnMissingSession && !resolvedSessionId) || sessionFailed,
     };
   };
 
