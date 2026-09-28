@@ -86,6 +86,9 @@ importers:
       '@paperclipai/adapter-codex-local':
         specifier: workspace:*
         version: link:../packages/adapters/codex-local
+      '@paperclipai/adapter-crush-local':
+        specifier: workspace:*
+        version: link:../packages/adapters/crush-local
       '@paperclipai/adapter-cursor-cloud':
         specifier: workspace:*
         version: link:../packages/adapters/cursor-cloud
@@ -212,6 +215,22 @@ importers:
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
+        version: 24.13.3
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+
+  packages/adapters/crush-local:
+    dependencies:
+      '@paperclipai/adapter-utils':
+        specifier: workspace:*
+        version: link:../../adapter-utils
+      picocolors:
+        specifier: ^1.1.1
+        version: 1.1.1
+    devDependencies:
+      '@types/node':
+        specifier: ^24.6.0
         version: 24.13.3
       typescript:
         specifier: ^7.0.2
@@ -907,6 +926,9 @@ importers:
       '@paperclipai/adapter-codex-local':
         specifier: workspace:*
         version: link:../packages/adapters/codex-local
+      '@paperclipai/adapter-crush-local':
+        specifier: workspace:*
+        version: link:../packages/adapters/crush-local
       '@paperclipai/adapter-cursor-cloud':
         specifier: workspace:*
         version: link:../packages/adapters/cursor-cloud
@@ -1115,6 +1137,9 @@ importers:
       '@paperclipai/adapter-codex-local':
         specifier: workspace:*
         version: link:../packages/adapters/codex-local
+      '@paperclipai/adapter-crush-local':
+        specifier: workspace:*
+        version: link:../packages/adapters/crush-local
       '@paperclipai/adapter-cursor-cloud':
         specifier: workspace:*
         version: link:../packages/adapters/cursor-cloud
