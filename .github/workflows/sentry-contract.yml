@@ -46,6 +46,11 @@ jobs:
         with:
           version: 9.15.4
 
+      # PR branches omit lockfile commits. Resolve their manifests before the
+      # frozen install, as the main PR workflow does.
+      - name: Resolve branch dependency lock
+        run: pnpm install --resolution-only --ignore-scripts --no-frozen-lockfile
+
       - name: Install workspace dependencies
         # Master owns the lockfile; PR verification can start before its refresh.
         # Resolve like the normal PR jobs, but this narrow contract needs no
